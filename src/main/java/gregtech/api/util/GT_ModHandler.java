@@ -17,7 +17,9 @@ import ic2.api.item.IC2Items;
 import ic2.api.item.IElectricItem;
 import ic2.api.reactor.IReactorComponent;
 import ic2.api.recipe.IRecipeInput;
+import ic2.api.recipe.RecipeInputFluidContainer;
 import ic2.api.recipe.RecipeInputItemStack;
+import ic2.api.recipe.RecipeInputOreDict;
 import ic2.api.recipe.RecipeOutput;
 import net.minecraft.block.Block;
 import net.minecraft.enchantment.Enchantment;
@@ -34,11 +36,15 @@ import net.minecraft.item.crafting.*;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.tileentity.TileEntityFurnace;
 import net.minecraft.world.World;
+import net.minecraftforge.fluids.Fluid;
+import net.minecraftforge.fluids.FluidContainerRegistry;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.oredict.OreDictionary;
 import net.minecraftforge.oredict.ShapedOreRecipe;
 import net.minecraftforge.oredict.ShapelessOreRecipe;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.Map.Entry;
@@ -1340,6 +1346,71 @@ public class GT_ModHandler {
         }
         return null;
     }
+    
+    // immibis added: same as getRecipeOutput but returns the recipe instead of the output.
+    public static IRecipe getRecipe(ItemStack... aRecipe) {
+        if (aRecipe == null) return null;
+        boolean temp = false;
+        for (byte i = 0; i < aRecipe.length; i++) {
+            if (aRecipe[i] != null) {
+                temp = true;
+                break;
+            }
+        }
+        if (!temp) return null;
+        InventoryCrafting aCrafting = new InventoryCrafting(new Container() {
+            @Override
+            public boolean canInteractWith(EntityPlayer var1) {
+                return false;
+            }
+        }, 3, 3);
+        for (int i = 0; i < 9 && i < aRecipe.length; i++) aCrafting.setInventorySlotContents(i, aRecipe[i]);
+        ArrayList<IRecipe> tList = (ArrayList<IRecipe>) CraftingManager.getInstance().getRecipeList();
+        for (int i = 0; i < tList.size(); i++) {
+            temp = false;
+            try {
+                temp = tList.get(i).matches(aCrafting, DW);
+            } catch (Throwable e) {
+                e.printStackTrace(GT_Log.err);
+            }
+            if (temp) {
+            	return tList.get(i);
+            }
+        }
+        return null;
+    }
+    
+    // immibis added for use with getRecipe
+    public static ItemStack getRecipeOutput(IRecipe recipe, ItemStack... stacks) {
+    	return getRecipeOutput(false, recipe, stacks);
+    }
+    // immibis added for use with getRecipe
+    public static ItemStack getRecipeOutput(boolean aUncopiedStack, IRecipe recipe, ItemStack... aRecipe) {
+        ItemStack tOutput;
+        InventoryCrafting aCrafting = new InventoryCrafting(new Container() {
+            @Override
+            public boolean canInteractWith(EntityPlayer var1) {
+                return false;
+            }
+        }, 3, 3);
+        for (int i = 0; i < 9 && i < aRecipe.length; i++) aCrafting.setInventorySlotContents(i, aRecipe[i]);
+        if(!recipe.matches(aCrafting, DW))
+        	return null;
+        if(aUncopiedStack)
+        	tOutput = recipe.getRecipeOutput();
+        else {
+            tOutput = recipe.getCraftingResult(aCrafting);
+        }
+        if (tOutput == null || tOutput.stackSize <= 0) {
+            // Seriously, who would ever do that shit?
+            if (!GregTech_API.sPostloadFinished)
+                throw new GT_ItsNotMyFaultException("Seems another Mod added a Crafting Recipe with null Output. Tell the Developer of said Mod to fix that.");
+            return null;
+        } else {
+            if (aUncopiedStack) return tOutput;
+            return GT_Utility.copy(tOutput);
+        }
+    }
 
     /**
      * Gives you a list of the Outputs from a Crafting Recipe
@@ -1477,19 +1548,58 @@ public class GT_ModHandler {
         return null;
     }
 
-    /**
-     * Used in my own Machines. Decreases StackSize of the Input if wanted.
-     * <p/>
-     * Checks also if there is enough Space in the Output Slots.
-     */
-    public static ItemStack[] getMachineOutput(ItemStack aInput, Map<IRecipeInput, RecipeOutput> aRecipeList, boolean aRemoveInput, NBTTagCompound rRecipeMetaData, ItemStack... aOutputSlots) {
-        if (aOutputSlots == null || aOutputSlots.length <= 0) return new ItemStack[0];
-        if (aInput == null) return new ItemStack[aOutputSlots.length];
-        try {
-            for (Entry<IRecipeInput, RecipeOutput> tEntry : aRecipeList.entrySet()) {
+    private static class IC2MachineRecipeCache {
+    	Map<Item, List<Map.Entry<IRecipeInput, RecipeOutput>>> itemKeyedRecipes = new HashMap<>();
+    	Map<Item, Map<Integer, List<Map.Entry<IRecipeInput, RecipeOutput>>>> itemAndMetaKeyedRecipes = new HashMap<>();
+    	Map<Fluid, List<Map.Entry<IRecipeInput, RecipeOutput>>> fluidKeyedRecipes = new HashMap<>();
+    	List<Map.Entry<IRecipeInput, RecipeOutput>> otherRecipes = new ArrayList<>();
+    	
+    	private static Object saveMemoryInternal(Object o) {
+    		if(o instanceof List)
+    			return Arrays.asList(((List)o).toArray());
+    		if(o instanceof Map) {
+    			for(Map.Entry e : (Iterable<Map.Entry>)((Map)o).entrySet())
+    				e.setValue(saveMemoryInternal(e.getValue()));
+    		}
+    		return o;
+    	}
+    	
+    	void saveMemory() {
+    		saveMemoryInternal(itemKeyedRecipes);
+    		saveMemoryInternal(itemAndMetaKeyedRecipes);
+    		saveMemoryInternal(fluidKeyedRecipes);
+    		otherRecipes = (List)saveMemoryInternal(otherRecipes);
+    	}
+    }
+    private static IdentityHashMap<Object, IC2MachineRecipeCache> machineRecipeCache = new IdentityHashMap<>();
+    
+    private static Field ic2MachineRecipeManagerListKeyField;
+    private static Object getIc2MachineRecipeManagerListKey(Object o) {
+    	// IC2 BasicMachineRecipeManager.getRecipes() returns a new anonymous class object each time.
+    	// Instead of keying off the wrapper object, key off the recipe manager itself.
+    	if(o instanceof HashMap)
+    		return o; // we might sometimes be called for gregtech internal recipe lists which are real maps?
+    	if(!"ic2.core.BasicMachineRecipeManager$1".equals(o.getClass().getName()))
+    		throw new AssertionError("unrecognized kind of recipe list: "+o.getClass());
+    	try {
+	    	if(ic2MachineRecipeManagerListKeyField == null) {
+	    		ic2MachineRecipeManagerListKeyField = o.getClass().getDeclaredField("this$0");
+	    		ic2MachineRecipeManagerListKeyField.setAccessible(true);
+	    	}
+	    	return ic2MachineRecipeManagerListKeyField.get(o);
+    	} catch(ReflectiveOperationException exc) {
+    		throw new AssertionError(exc);
+    	}
+    }
+    
+    private static ItemStack[] getMachineOutputInternal(ItemStack aInput, Collection<Map.Entry<IRecipeInput, RecipeOutput>> aRecipeList, boolean aRemoveInput, NBTTagCompound rRecipeMetaData, ItemStack[] aOutputSlots) {
+    	if(aRecipeList == null) // cache slot not present (see caller)
+    		return null;
+    	try {
+            for (Entry<IRecipeInput, RecipeOutput> tEntry : aRecipeList) {
                 if (tEntry.getKey().matches(aInput)) {
                     if (tEntry.getKey().getAmount() <= aInput.stackSize) {
-                        ItemStack[] tList = (ItemStack[]) tEntry.getValue().items.toArray(new ItemStack[tEntry.getValue().items.size()]);
+                        ItemStack[] tList = tEntry.getValue().items.toArray(new ItemStack[tEntry.getValue().items.size()]);
                         if (tList.length == 0) break;
                         ItemStack[] rList = new ItemStack[aOutputSlots.length];
                         rRecipeMetaData.setTag("return", tEntry.getValue().metadata);
@@ -1512,6 +1622,98 @@ public class GT_ModHandler {
         } catch (Throwable e) {
             if (D1) e.printStackTrace(GT_Log.err);
         }
+    	return null;
+    }
+    
+    /**
+     * Used in my own Machines. Decreases StackSize of the Input if wanted.
+     * <p/>
+     * Checks also if there is enough Space in the Output Slots.
+     */
+    public static ItemStack[] getMachineOutput(ItemStack aInput, Map<IRecipeInput, RecipeOutput> aRecipeList, boolean aRemoveInput, NBTTagCompound rRecipeMetaData, ItemStack... aOutputSlots) {
+        if (aOutputSlots == null || aOutputSlots.length <= 0) return new ItemStack[0];
+        if (aInput == null) return new ItemStack[aOutputSlots.length];
+        
+        if (!GregTech_API.sPostloadFinished) {
+        	ItemStack[] result = getMachineOutputInternal(aInput, aRecipeList.entrySet(), aRemoveInput, rRecipeMetaData, aOutputSlots);
+        	return result != null ? result : new ItemStack[aOutputSlots.length];
+        }
+        
+        Object recipeSetKey = getIc2MachineRecipeManagerListKey(aRecipeList);
+        IC2MachineRecipeCache recipeSetCache = machineRecipeCache.get(recipeSetKey);
+        if(recipeSetCache == null) {
+        	recipeSetCache = new IC2MachineRecipeCache();
+        	
+        	System.out.println("[immibis gt speedhax] Initializing a recipe lookup table for "+aRecipeList.size()+" recipes idhash="+System.identityHashCode(recipeSetKey));
+        	long start = System.nanoTime();
+        	for(Entry<IRecipeInput, RecipeOutput> entry : aRecipeList.entrySet()) {
+        		// seen classes
+        		// there's also one from pneumaticcraft, possibly others...
+        		/*Class<?> clazz = entry.getKey().getClass();
+        		if(clazz != RecipeInputFluidContainer.class
+        		&& clazz != RecipeInputItemStack.class
+        		&& clazz != RecipeInputOreDict.class
+        		&& !clazz.getName().equals("minetweaker.mods.ic2.IC2RecipeInput"))
+        			throw new AssertionError("immibis hax: saw unrecognized recipe input matcher type: "+entry.getKey().getClass());
+        		*/
+        		List<Map.Entry<IRecipeInput, RecipeOutput>> cacheSlot;
+    			if(entry.getKey() instanceof RecipeInputItemStack || entry.getKey() instanceof RecipeInputOreDict) {
+	        		for(ItemStack input : entry.getKey().getInputs()) {
+	        			if(input.getItemDamage() == OreDictionary.WILDCARD_VALUE) {
+	        				cacheSlot = recipeSetCache.itemKeyedRecipes.get(input.getItem());
+	        				if(cacheSlot == null)
+	        					recipeSetCache.itemKeyedRecipes.put(input.getItem(), cacheSlot = new ArrayList<>());
+	        			} else {
+	        				Map<Integer, List<Entry<IRecipeInput, RecipeOutput>>> subCache = recipeSetCache.itemAndMetaKeyedRecipes.get(input.getItem());
+	        				if(subCache == null)
+	        					recipeSetCache.itemAndMetaKeyedRecipes.put(input.getItem(), subCache = new HashMap<>());
+	        				cacheSlot = subCache.get(input.getItemDamage());
+	        				if(cacheSlot == null)
+	        					subCache.put(input.getItemDamage(), cacheSlot = new ArrayList<>());
+	        			}
+	        			if(!cacheSlot.contains(entry))
+	        				cacheSlot.add(entry);
+	        		}
+        		} else if(entry.getKey() instanceof RecipeInputFluidContainer) {
+        			Fluid fl = ((RecipeInputFluidContainer)entry.getKey()).fluid;
+        			cacheSlot = recipeSetCache.fluidKeyedRecipes.get(fl);
+        			if(cacheSlot == null)
+        				recipeSetCache.fluidKeyedRecipes.put(fl, cacheSlot = new ArrayList<>());
+        			if(!cacheSlot.contains(entry))
+        				cacheSlot.add(entry);
+        		} else {
+        			cacheSlot = recipeSetCache.otherRecipes;
+        			if(!cacheSlot.contains(entry))
+        				cacheSlot.add(entry);
+        		}
+        	}
+        	
+        	// save some memory by converting to fixed-size lists
+        	recipeSetCache.saveMemory();
+        	
+        	machineRecipeCache.put(recipeSetKey, recipeSetCache);
+        	System.out.println("[immibis gt speedhax] Initialized a recipe lookup table, took "+(System.nanoTime()-start)+" ns");
+        }
+        
+        FluidStack containedFluid = FluidContainerRegistry.getFluidForFilledItem(aInput);
+        if(containedFluid != null) {
+        	ItemStack[] result = getMachineOutputInternal(aInput, recipeSetCache.fluidKeyedRecipes.get(containedFluid.fluid), aRemoveInput, rRecipeMetaData, aOutputSlots);
+        	if(result != null)
+        		return result;
+        }
+        
+        Map<Integer, List<Entry<IRecipeInput, RecipeOutput>>> subCache = recipeSetCache.itemAndMetaKeyedRecipes.get(aInput.getItem());
+        if(subCache != null) {
+        	ItemStack[] result = getMachineOutputInternal(aInput, subCache.get(aInput.getItemDamage()), aRemoveInput, rRecipeMetaData, aOutputSlots);
+        	if(result != null)
+        		return result;
+        }
+        ItemStack[] result = getMachineOutputInternal(aInput, recipeSetCache.itemKeyedRecipes.get(aInput.getItem()), aRemoveInput, rRecipeMetaData, aOutputSlots);
+    	if(result != null)
+    		return result;
+    	result = getMachineOutputInternal(aInput, recipeSetCache.otherRecipes, aRemoveInput, rRecipeMetaData, aOutputSlots);
+    	if(result != null)
+    		return result;
         return new ItemStack[aOutputSlots.length];
     }
 
