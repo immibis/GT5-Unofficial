@@ -28,7 +28,7 @@ import net.minecraft.util.EnumChatFormatting;
 import net.minecraft.world.World;
 import net.minecraftforge.common.util.ForgeDirection;
 
-import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Arrays;
 
 import static gregtech.api.enums.GT_Values.VN;
@@ -139,11 +139,11 @@ public class GT_MetaPipeEntity_Cable extends MetaPipeEntity implements IMetaTile
     public long injectEnergyUnits(byte aSide, long aVoltage, long aAmperage) {
         if (!getBaseMetaTileEntity().getCoverBehaviorAtSide(aSide).letsEnergyIn(aSide, getBaseMetaTileEntity().getCoverIDAtSide(aSide), getBaseMetaTileEntity().getCoverDataAtSide(aSide), getBaseMetaTileEntity()))
             return 0;
-        return transferElectricity(aSide, aVoltage, aAmperage, new ArrayList<TileEntity>(Arrays.asList((TileEntity) getBaseMetaTileEntity())));
+        return transferElectricity(aSide, aVoltage, aAmperage, new HashSet<TileEntity>(Arrays.asList((TileEntity) getBaseMetaTileEntity())));
     }
 
     @Override
-    public long transferElectricity(byte aSide, long aVoltage, long aAmperage, ArrayList<TileEntity> aAlreadyPassedTileEntityList) {
+    public long transferElectricity(byte aSide, long aVoltage, long aAmperage, HashSet<TileEntity> aAlreadyPassedTileEntityList) {
         long rUsedAmperes = 0;
         aVoltage -= mCableLossPerMeter;
         if (aVoltage > 0) for (byte i = 0; i < 6 && aAmperage > rUsedAmperes; i++)
@@ -181,7 +181,7 @@ public class GT_MetaPipeEntity_Cable extends MetaPipeEntity implements IMetaTile
                             rUsedAmperes++;
                         } else if (((IEnergyReceiver) tTileEntity).receiveEnergy(tDirection, rfOut, true) > 0) {
                             if (mRestRF == 0) {
-                                int RFtrans = ((IEnergyReceiver) tTileEntity).receiveEnergy(tDirection, (int) rfOut, false);
+                                int RFtrans = ((IEnergyReceiver) tTileEntity).receiveEnergy(tDirection, rfOut, false);
                                 rUsedAmperes++;
                                 mRestRF = rfOut - RFtrans;
                             } else {
