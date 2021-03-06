@@ -116,9 +116,6 @@ dependencies {
 	compileOnly "appeng:appliedenergistics2:rv3-beta-6:dev"	
 	compileOnly "applecore:AppleCore:1.7.10-3.1.1:deobf"
 	compileOnly "com.shedar.IC2NuclearControl:IC2NuclearControl:2.4.3a:dev"
-
-	compileOnly files("libs/ImmersiveEngineering-0.7.7-deobf.jar")
-	compileOnly files("libs/magneticraft-0.6.1-final.jar")
 }
 
 processResources
