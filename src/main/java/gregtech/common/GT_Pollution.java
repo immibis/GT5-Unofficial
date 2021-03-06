@@ -129,7 +129,7 @@ public class GT_Pollution {
 					int x =tPos.chunkPosX<<4+(tRan.nextInt(16));;
 					int y =60 +(-f+tRan.nextInt(f*2+1));
 					int z =tPos.chunkPosZ<<4+(tRan.nextInt(16));
-					damageBlock(x, y, z, tPollution > GT_Mod.gregtechproxy.mPollutionSourRainLimit);
+					damageBlock(aWorld, x, y, z, tPollution > GT_Mod.gregtechproxy.mPollutionSourRainLimit);
 				}}}}
 					}
 				}
@@ -137,8 +137,7 @@ public class GT_Pollution {
 			}}
 	}
 	
-	public static void damageBlock(int x, int y, int z, boolean sourRain){
-		World world = DimensionManager.getWorld(0);
+	public static void damageBlock(World world, int x, int y, int z, boolean sourRain){
 		if (world.isRemote)	return;
 		Block tBlock = world.getBlock(x, y, z);
 		int tMeta = world.getBlockMetadata(x, y, z);
