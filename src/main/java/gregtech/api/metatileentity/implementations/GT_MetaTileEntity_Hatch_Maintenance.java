@@ -1,6 +1,7 @@
 package gregtech.api.metatileentity.implementations;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import gregtech.GT_Mod;
@@ -26,7 +27,6 @@ import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
-import scala.actors.threadpool.Arrays;
 
 public class GT_MetaTileEntity_Hatch_Maintenance extends GT_MetaTileEntity_Hatch {
     public boolean mWrench = false, mScrewdriver = false, mSoftHammer = false, mHardHammer = false, mSolderingTool = false, mCrowbar = false, mAuto;
