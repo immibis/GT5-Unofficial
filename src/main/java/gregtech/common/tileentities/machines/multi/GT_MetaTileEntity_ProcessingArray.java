@@ -129,6 +129,12 @@ public class GT_MetaTileEntity_ProcessingArray extends GT_MetaTileEntity_MultiBl
             return GT_Recipe.GT_Recipe_Map.sPolarizerRecipes;
         } else if(tmp.startsWith("press")){
             return GT_Recipe.GT_Recipe_Map.sPressRecipes;
+        } else if(tmp.startsWith("amplifab")) {
+            return GT_Recipe.GT_Recipe_Map.sAmplifiers;
+        } else if(tmp.startsWith("massfab")) {
+            // xxx there is none, and you don't need it, because the mass fab doesn't lose efficiency with voltage
+        } else if(tmp.startsWith("replicator")) {
+            // xxx there is none
         }
 
         return null;
